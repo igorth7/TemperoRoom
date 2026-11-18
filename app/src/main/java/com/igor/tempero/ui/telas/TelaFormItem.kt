@@ -1,6 +1,5 @@
 package com.igor.tempero.ui.telas
 
-import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -22,81 +21,43 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.igor.tempero.data.local.AppDatabase
-import com.igor.tempero.data.local.ItemCompra
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.igor.tempero.ui.componentes.BarraTopo
 import com.igor.tempero.ui.theme.CinzaTexto
 import com.igor.tempero.ui.theme.Creme
 import com.igor.tempero.ui.theme.Laranja
 import com.igor.tempero.ui.theme.VermelhoErro
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.igor.tempero.viewmodel.ComprasViewModel
 
-private const val TAG = "TelaFormItem"
-
-/**
- * Tela 6 – Formulário de item da lista de compras.
- * itemId = -1 -> novo (INSERT) | itemId = id -> editar (UPDATE)
- */
+/** Tela 6 – Formulário de item (novo ou editar). Validação e salvar ficam no ViewModel. */
 @Composable
 fun TelaFormItem(
     itemId: Int,
+    viewModel: ComprasViewModel,
     aoVoltar: () -> Unit
 ) {
-    val context = LocalContext.current
-    val dao = remember { AppDatabase.getDatabase(context).itemCompraDao() }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val editando = itemId != -1
 
-    var original by remember { mutableStateOf<ItemCompra?>(null) }
     var nome by remember { mutableStateOf("") }
     var quantidade by remember { mutableStateOf("1") }
-    var erro by remember { mutableStateOf<String?>(null) }
+    var preenchido by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        if (editando) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val item = dao.buscarPorId(itemId)
-                    withContext(Dispatchers.Main) {
-                        if (item != null) {
-                            original = item
-                            nome = item.nome
-                            quantidade = item.quantidade.toString()
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Erro ao carregar item para editar", e)
-                }
-            }
-        }
+    LaunchedEffect(itemId) {
+        viewModel.limparErroFormulario()
+        if (editando) viewModel.selecionarItem(itemId)
     }
 
-    val salvar: () -> Unit = {
-        val qtd = quantidade.toIntOrNull()
-        erro = when {
-            nome.isBlank() -> "Digite o nome do item."
-            qtd == null || qtd <= 0 -> "A quantidade precisa ser maior que zero."
-            else -> null
-        }
-        if (erro == null) {
-            // Na edição mantém os outros campos (comprado, receitaId) com copy
-            val item = original?.copy(nome = nome.trim(), quantidade = qtd ?: 1)
-                ?: ItemCompra(nome = nome.trim(), quantidade = qtd ?: 1)
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    if (editando) dao.atualizar(item) else dao.inserir(item)
-                    withContext(Dispatchers.Main) { aoVoltar() }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Erro ao salvar item", e)
-                    withContext(Dispatchers.Main) { erro = "Não foi possível salvar. Tente de novo." }
-                }
-            }
+    val original = uiState.itemSelecionado?.takeIf { editando && it.id == itemId }
+
+    LaunchedEffect(original) {
+        if (original != null && !preenchido) {
+            nome = original.nome
+            quantidade = original.quantidade.toString()
+            preenchido = true
         }
     }
 
@@ -132,12 +93,13 @@ fun TelaFormItem(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            val erro = uiState.erroFormulario
             if (erro != null) {
                 Text("⚠️ $erro", color = VermelhoErro, fontSize = 14.sp)
             }
 
             Button(
-                onClick = salvar,
+                onClick = { viewModel.salvarItem(original, nome, quantidade, aoTerminar = aoVoltar) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),

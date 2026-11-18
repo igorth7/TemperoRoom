@@ -1,7 +1,5 @@
 package com.igor.tempero.ui.telas
 
-import android.util.Log
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +34,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,13 +41,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.igor.tempero.data.local.AppDatabase
-import com.igor.tempero.data.local.ItemCompra
-import com.igor.tempero.data.local.Receita
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.igor.tempero.ui.componentes.BarraTopo
 import com.igor.tempero.ui.componentes.CardNumero
 import com.igor.tempero.ui.componentes.EstadoVazio
@@ -63,100 +57,33 @@ import com.igor.tempero.ui.theme.LaranjaClaro
 import com.igor.tempero.ui.theme.Linha
 import com.igor.tempero.ui.theme.Marrom
 import com.igor.tempero.ui.theme.VermelhoErro
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-private const val TAG = "TelaDetalheReceita"
+import com.igor.tempero.viewmodel.ComprasViewModel
+import com.igor.tempero.viewmodel.ReceitasViewModel
 
 /**
  * Tela 2 – Detalhe da receita.
- * Recebe só o id pela rota e BUSCA a receita no banco com buscarPorId(id).
- * Extra: cruza com a lista de compras (quantos ingredientes já estão lá
- * e botão para adicionar os que faltam).
+ * Pede ao ViewModel a receita do id da rota (que busca no banco pelo Repository).
+ * Usa os 2 ViewModels: receita (ReceitasViewModel) + lista de compras (ComprasViewModel).
  */
 @Composable
 fun TelaDetalheReceita(
     receitaId: Int,
+    receitasViewModel: ReceitasViewModel,
+    comprasViewModel: ComprasViewModel,
     aoVoltar: () -> Unit,
     aoEditar: () -> Unit,
     aoAbrirItem: (Int) -> Unit
 ) {
-    val context = LocalContext.current
-    val banco = remember { AppDatabase.getDatabase(context) }
-    val receitaDao = banco.receitaDao()
-    val itemDao = banco.itemCompraDao()
-
-    var receita by remember { mutableStateOf<Receita?>(null) }
-    val itens = remember { mutableStateListOf<ItemCompra>() }
-    var carregou by remember { mutableStateOf(false) }
+    val estadoReceitas by receitasViewModel.uiState.collectAsStateWithLifecycle()
+    val estadoCompras by comprasViewModel.uiState.collectAsStateWithLifecycle()
     var confirmarExclusao by remember { mutableStateOf(false) }
 
-    val recarregar: () -> Unit = {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val encontrada = receitaDao.buscarPorId(receitaId)   // consulta filtrada pelo id
-                val todosItens = itemDao.buscarTodos()
-                withContext(Dispatchers.Main) {
-                    receita = encontrada
-                    itens.clear()
-                    itens.addAll(todosItens)
-                    carregou = true
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao buscar a receita $receitaId", e)
-            }
-        }
+    LaunchedEffect(receitaId) {
+        receitasViewModel.selecionarReceita(receitaId)
     }
 
-    LaunchedEffect(Unit) {
-        recarregar()
-    }
-
-    val alternarFavorita: () -> Unit = {
-        val atual = receita
-        if (atual != null) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    receitaDao.atualizar(atual.copy(favorita = !atual.favorita))
-                    recarregar()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Erro ao favoritar", e)
-                }
-            }
-        }
-    }
-
-    val adicionarIngredientes: (List<String>) -> Unit = { faltando ->
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                faltando.forEach { ingrediente ->
-                    itemDao.inserir(ItemCompra(nome = ingrediente, receitaId = receitaId))
-                }
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "${faltando.size} ingrediente(s) adicionado(s) à lista", Toast.LENGTH_SHORT).show()
-                }
-                recarregar()
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao adicionar ingredientes", e)
-            }
-        }
-    }
-
-    val excluir: () -> Unit = {
-        val atual = receita
-        if (atual != null) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    receitaDao.deletar(atual)   // DELETE
-                    withContext(Dispatchers.Main) { aoVoltar() }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Erro ao excluir", e)
-                }
-            }
-        }
-    }
+    // Só usa a selecionada se for mesmo a deste id
+    val receita = estadoReceitas.receitaSelecionada?.takeIf { it.id == receitaId }
 
     Scaffold(
         topBar = {
@@ -164,11 +91,10 @@ fun TelaDetalheReceita(
                 titulo = receita?.nome ?: "Receita",
                 aoVoltar = aoVoltar,
                 acoes = {
-                    val atual = receita
-                    if (atual != null) {
-                        IconButton(onClick = alternarFavorita) {
+                    if (receita != null) {
+                        IconButton(onClick = { receitasViewModel.alternarFavorita(receita) }) {
                             Icon(
-                                if (atual.favorita) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                if (receita.favorita) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                                 contentDescription = "Favoritar"
                             )
                         }
@@ -185,21 +111,17 @@ fun TelaDetalheReceita(
         containerColor = Creme,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        val atual = receita
-        if (atual == null) {
-            if (carregou) {
+        if (receita == null) {
+            if (estadoReceitas.selecionadaCarregou) {
                 Column(Modifier.padding(padding)) {
                     EstadoVazio("😕", "Receita não encontrada", "Ela pode ter sido excluída.")
                 }
             }
         } else {
-            val ingredientes = atual.listaIngredientes()
-            // Cruzamento das duas tabelas: ingredientes que já estão na lista de compras
-            val naLista = ingredientes.filter { ingrediente ->
-                itens.any { it.nome.equals(ingrediente, ignoreCase = true) }
-            }
-            val faltando = ingredientes - naLista.toSet()
-            val itensDaReceita = itens.filter { it.receitaId == atual.id }
+            val ingredientes = receita.listaIngredientes()
+            val faltando = estadoCompras.ingredientesFaltando(receita)
+            val naLista = ingredientes - faltando.toSet()
+            val itensDaReceita = estadoCompras.itens.filter { it.receitaId == receita.id }
 
             Column(
                 modifier = Modifier
@@ -217,15 +139,15 @@ fun TelaDetalheReceita(
                         .background(LaranjaClaro),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(emojiCategoria(atual.categoria), fontSize = 72.sp)
+                    Text(emojiCategoria(receita.categoria), fontSize = 72.sp)
                 }
 
-                Text(atual.nome, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Marrom)
+                Text(receita.nome, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Marrom)
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CardNumero("${atual.tempoMinutos}", "minutos", Modifier.weight(1f))
-                    CardNumero("${atual.porcoes}", "porções", Modifier.weight(1f))
-                    CardNumero(atual.categoria, "categoria", Modifier.weight(1f))
+                    CardNumero("${receita.tempoMinutos}", "minutos", Modifier.weight(1f))
+                    CardNumero("${receita.porcoes}", "porções", Modifier.weight(1f))
+                    CardNumero(receita.categoria, "categoria", Modifier.weight(1f))
                 }
 
                 // ---------- Extra: receita x lista de compras ----------
@@ -249,7 +171,7 @@ fun TelaDetalheReceita(
                             trackColor = Linha
                         )
                         Button(
-                            onClick = { adicionarIngredientes(faltando) },
+                            onClick = { comprasViewModel.adicionarIngredientes(receita) },
                             enabled = faltando.isNotEmpty(),
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = Laranja)
@@ -274,7 +196,7 @@ fun TelaDetalheReceita(
                 }
 
                 TituloSecao("Modo de preparo")
-                Text(atual.modoPreparo, fontSize = 15.sp, color = Marrom, lineHeight = 22.sp)
+                Text(receita.modoPreparo, fontSize = 15.sp, color = Marrom, lineHeight = 22.sp)
 
                 if (itensDaReceita.isNotEmpty()) {
                     TituloSecao("Na sua lista de compras")
@@ -294,15 +216,15 @@ fun TelaDetalheReceita(
         }
     }
 
-    if (confirmarExclusao) {
+    if (confirmarExclusao && receita != null) {
         AlertDialog(
             onDismissRequest = { confirmarExclusao = false },
             title = { Text("Excluir receita?") },
-            text = { Text("\"${receita?.nome}\" será apagada do banco.") },
+            text = { Text("\"${receita.nome}\" será apagada do banco.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmarExclusao = false
-                    excluir()
+                    receitasViewModel.excluir(receita, aoTerminar = aoVoltar)
                 }) { Text("Excluir", color = VermelhoErro) }
             },
             dismissButton = {

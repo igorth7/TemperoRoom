@@ -1,102 +1,113 @@
-# Tempero Room – Trabalho 3 (Persistência com Room)
+# Tempero Room – Trabalho 4 (Arquitetura MVVM)
 
 **Aluno:** Igor  
 **Turma:** 2 [Android - ECO] - Ter/Qua Manhã  
 **Disciplina:** Desenvolvimento de Aplicativos Móveis – Prof. Andre Luis
 
+> O README do Trabalho 3 (Room) continua neste repositório em [README_T3.md](README_T3.md).
+
 ## 1. Sobre o projeto
 
-O **Tempero Room** é a evolução do app do Trabalho 2 (Tempero MAF): o mesmo app de
-receitas e lista de compras, com as mesmas 7 telas, mas agora **tudo fica salvo no
-banco de dados do celular com o Room**. Fechou o app e abriu de novo, os dados continuam lá.
+Este é o **mesmo app do Trabalho 3** (Tempero Room: receitas + lista de compras salvas
+no Room), agora **reorganizado em MVVM**. Nenhuma funcionalidade nova foi adicionada:
+o objetivo foi separar as responsabilidades em camadas. O app continua fazendo tudo
+o que fazia no T3 (cadastrar, editar, excluir, favoritar, marcar comprado, mudar
+quantidade, adicionar os ingredientes de uma receita na lista, e os dados continuam
+salvos depois de fechar o app).
 
 ## 2. Como rodar
 
 1. Abra a pasta `TemperoRoom` no **Android Studio**.
-2. Espere o **Gradle Sync** terminar (ele baixa o Room e o KSP).
+2. Espere o **Gradle Sync** terminar.
 3. Escolha um emulador (ou celular) e clique em **Run ▶**.
-4. Na primeira vez o banco está vazio: toque em **"Carregar receitas de exemplo"** ou cadastre no **+**.
+4. Se o banco estiver vazio, toque em **"Carregar receitas de exemplo"**.
 
 ## 3. O que foi feito (requisitos)
 
 | Requisito | Onde está |
 |---|---|
-| Dependências do Room (runtime + compilador com KSP) | `app/build.gradle.kts` e `build.gradle.kts` |
-| 2 `@Entity` com `@PrimaryKey(autoGenerate = true) val id: Int = 0` | `data/local/Receita.kt` e `data/local/ItemCompra.kt` |
-| 2 `@Dao` com `suspend` `@Insert`, `@Query` (buscarTodos), `@Update`, `@Delete` | `data/local/ReceitaDao.kt` e `data/local/ItemCompraDao.kt` |
-| Consulta filtrada `buscarPorId(id: Int)` | Nos dois DAOs (e `buscarPorReceita` / `limparComprados` no de itens) |
-| Tela de detalhe busca o item no banco pelo id da navegação | `TelaDetalheReceita.kt` e `TelaDetalheItem.kt` |
-| `AppDatabase` abstrata com `companion object`, `@Volatile` e `synchronized` (Singleton) | `data/local/AppDatabase.kt` |
-| Toda chamada ao banco dentro de `CoroutineScope(Dispatchers.IO).launch { }` | Todas as telas em `ui/telas/` |
-| `LaunchedEffect(Unit)` para carregar ao abrir a tela | Todas as telas em `ui/telas/` |
-| `try/catch` com `Log.e` | Em toda operação no banco |
-| Adicionar, editar (Update) e remover salvos no banco | Formulários (novo/editar), favoritar, marcar comprado, quantidade, excluir |
+| Pacotes `ui`, `data.local`, `data.repository`, `viewmodel` | `com.igor.tempero.*` (estrutura abaixo) |
+| 1 Repository por Entity (só ele fala com o DAO) | `ReceitaRepository.kt` e `ItemCompraRepository.kt` |
+| `buscarTodos()` do DAO devolve `Flow<List<...>>` (sem `suspend`) | `ReceitaDao.kt` e `ItemCompraDao.kt` |
+| 2 ViewModels, cada um com `data class UiState` | `ReceitasViewModel` + `ReceitasUiState`, `ComprasViewModel` + `ComprasUiState` |
+| `private val _uiState = MutableStateFlow(...)` e `val uiState: StateFlow<...> = _uiState.asStateFlow()` | Nos 2 ViewModels |
+| Ações com `viewModelScope.launch` | Todas as funções dos ViewModels que mexem no banco |
+| ViewModelFactory (`ViewModelProvider.Factory`) que injeta os Repositories | `viewmodel/AppViewModelFactory.kt` |
+| ViewModels obtidos com `viewModel(factory = ...)` | `navigation/AppNavigation.kt` |
+| Telas sem `dao`, sem `CoroutineScope` e sem `Dispatchers.IO`, usando `collectAsStateWithLifecycle` | Todas as telas em `ui/telas/` |
 
 ### Estrutura
 
 ```
 com.igor.tempero
-├── MainActivity.kt
-├── data/local/
-│   ├── Receita.kt, ItemCompra.kt       → @Entity (tabelas)
-│   ├── ReceitaDao.kt, ItemCompraDao.kt → @Dao (SQL)
-│   ├── AppDatabase.kt                  → @Database (Singleton)
-│   └── ReceitasExemplo.kt              → receitas do botão "Carregar exemplos"
-├── navigation/  → Rotas.kt e AppNavigation.kt (NavHost)
-└── ui/          → componentes, telas e tema
+├── MainActivity.kt              → monta Banco → DAOs → Repositories → Factory
+├── data/
+│   ├── local/                   → Receita, ItemCompra (@Entity), DAOs, AppDatabase
+│   └── repository/              → ReceitaRepository, ItemCompraRepository
+├── viewmodel/                   → ReceitasViewModel, ComprasViewModel, AppViewModelFactory
+├── navigation/                  → Rotas e AppNavigation (NavHost)
+└── ui/                          → telas, componentes e tema (só mostram e avisam o ViewModel)
 ```
+
+Caminho de um clique (ex: favoritar):
+`Tela → ReceitasViewModel.alternarFavorita() → ReceitaRepository.atualizar() → ReceitaDao.atualizar() → Room`  
+e a volta: `Room → Flow do DAO → Repository → ViewModel (_uiState) → uiState → Tela redesenha`.
 
 ## 4. Respostas e evidências
 
-**Como os dados eram guardados no Trabalho 2?**  
-Em duas listas `mutableStateListOf` criadas no `AppNavigation`. Elas existiam só
-enquanto o app estava aberto: fechou o app, tudo voltava para os dados iniciais.
+**Como era no T3 e o que mudou?**  
+No T3 cada tela fazia tudo: pegava o `AppDatabase`, chamava o DAO dentro de
+`CoroutineScope(Dispatchers.IO).launch`, tinha o `try/catch`, guardava a lista num
+`mutableStateListOf` e precisava buscar de novo no banco depois de cada alteração.
+Agora a tela só **mostra** o `uiState` e **avisa** o ViewModel ("o usuário clicou em
+favoritar"). Quem decide o que fazer é o ViewModel, e quem fala com o banco é o Repository.
+Como o `buscarTodos()` virou `Flow`, a lista se atualiza sozinha: não precisa mais
+recarregar depois de inserir, editar ou apagar.
 
-**Quais Entity, DAO e Database criei e por quê?**  
-- `Receita` (tabela `receitas`) e `ItemCompra` (tabela `itens_compra`): são os dois
-  dados do app. O `id` é gerado pelo Room (`autoGenerate = true`). Como o Room não
-  guarda `List<String>` direto, os ingredientes viraram um texto com um ingrediente
-  por linha (`listaIngredientes()` transforma de volta em lista).
-  `ItemCompra.receitaId` liga o item à receita de onde ele veio.
-- `ReceitaDao` e `ItemCompraDao`: cada um com o CRUD da sua tabela, tudo `suspend`
-  porque acessar banco é demorado e não pode travar a tela.
-- `AppDatabase`: junta as duas tabelas. É um Singleton (`@Volatile` + `synchronized`)
-  para existir só uma conexão com o banco no app inteiro.
+**Como dividi os pacotes?**  
+- `data.local`: tudo do Room (Entities, DAOs e o AppDatabase).
+- `data.repository`: um Repository para cada Entity.
+- `viewmodel`: os ViewModels, os UiStates e a Factory.
+- `ui`: telas, componentes visuais e tema. A navegação ficou no pacote `navigation`.
 
-**Quais consultas (queries) usei?**  
-- `SELECT * FROM receitas ORDER BY id DESC` – todas as receitas, as novas primeiro.
-- `SELECT * FROM receitas WHERE id = :id` – uma receita (tela de detalhe e edição).
-- `SELECT * FROM itens_compra ORDER BY comprado ASC, id ASC` – itens, os pendentes primeiro.
-- `SELECT * FROM itens_compra WHERE id = :id` – um item.
-- `SELECT * FROM itens_compra WHERE receitaId = :receitaId` – itens de uma receita.
-- `DELETE FROM itens_compra WHERE comprado = 1` – botão "Limpar comprados".
-- Inserir, atualizar e apagar usam `@Insert`, `@Update` e `@Delete`.
+**Por que usar Repository?**  
+Para a tela e o ViewModel não dependerem do Room. O Repository é o único que conhece
+o DAO; se um dia os dados vierem de uma API, só ele muda. Ele também concentra o
+tratamento de erro (`try/catch` com `Log.e`) que antes estava espalhado nas telas.
 
-**Qual foi a dificuldade de sair do `mutableStateListOf` para o Room?**  
-- Antes a tela mexia direto na lista; agora toda operação precisa ir para uma
-  thread de fundo (`Dispatchers.IO`) e, depois, voltar para a thread da tela
-  (`withContext(Dispatchers.Main)`) para atualizar o que aparece.
-- Depois de gravar, a tela precisa buscar de novo no banco para mostrar a mudança.
-- Passar o objeto inteiro pela navegação não funciona bem; passei só o **id** e
-  a tela de detalhe busca no banco com `buscarPorId(id)`.
-- Guardar a lista de ingredientes (o Room não salva `List` direto).
-- Configurar o KSP e o Room no Gradle.
+**O que tem em cada UiState?**  
+- `ReceitasUiState`: `receitas` (do banco), `busca`, `categoria`, `carregando`,
+  `receitaSelecionada` (detalhe/edição), `selecionadaCarregou`, `erroFormulario`,
+  `mensagem` (Toast) e `filtradas` (lista já filtrada, calculada).
+- `ComprasUiState`: `itens`, `receitas` (para mostrar a origem de cada item),
+  `carregando`, `itemSelecionado`, `selecionadoCarregou`, `erroFormulario`, `mensagem`,
+  `comprados` (calculado), `receitaDe(item)` e `ingredientesFaltando(receita)`.
 
-**Teste de persistência**  
-Cadastrei uma receita, favoritei, adicionei os ingredientes na lista e marquei um
-item como comprado. Fechei o app (removi dos recentes) e abri de novo: tudo continuava lá.
+**O que quebrou durante a refatoração?**  
+- Ao trocar `buscarTodos()` para `Flow`, todas as telas que chamavam esse método
+  pararam de compilar, porque não dava mais para chamar como `suspend`.
+- O detalhe e o formulário de edição dependiam do `buscarPorId` dentro da tela;
+  passaram a pedir ao ViewModel (`selecionarReceita(id)` / `selecionarItem(id)`).
+- Os ViewModels são compartilhados entre as telas, então o detalhe podia mostrar por um
+  instante o item escolhido antes; resolvi conferindo se o id selecionado é o da rota.
+- O formulário de edição precisou de um `LaunchedEffect` para preencher os campos só
+  quando a receita chega do banco.
+
+**Dificuldades**  
+- Entender o caminho do dado entre as camadas (tela → ViewModel → Repository → DAO e a volta pelo Flow).
+- Criar a Factory para o ViewModel receber o Repository no construtor.
+- Tirar toda a lógica das telas sem perder nenhuma funcionalidade do T3.
 
 ### Prints
 
 | Tela | Print |
 |---|---|
-| Receitas (do banco) | ![](docs/prints/01-receitas.png) |
-| Detalhe (busca por id) | ![](docs/prints/02-detalhe-receita.png) |
-| Editar receita | ![](docs/prints/03-editar-receita.png) |
-| Lista de compras | ![](docs/prints/04-compras.png) |
-| Detalhe do item | ![](docs/prints/05-detalhe-item.png) |
-| Perfil | ![](docs/prints/06-perfil.png) |
+| Receitas | ![](docs/prints/t4-01-receitas.png) |
+| Detalhe da receita | ![](docs/prints/t4-02-detalhe-receita.png) |
+| Lista de compras | ![](docs/prints/t4-03-compras.png) |
+| Detalhe do item | ![](docs/prints/t4-04-detalhe-item.png) |
+| Estrutura de pacotes no Android Studio | ![](docs/prints/t4-05-pacotes.png) |
 
-### Vídeo (fechar e abrir o app de novo)
+### Vídeo
 
-[Vídeo do teste de persistência](docs/video-tempero-room.mp4)
+[Vídeo do app funcionando depois da refatoração](docs/video-tempero-mvvm.mp4)

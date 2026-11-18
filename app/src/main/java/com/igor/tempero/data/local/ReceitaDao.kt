@@ -5,6 +5,7 @@ import androidx.room3.Delete
 import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Update
+import kotlinx.coroutines.flow.Flow
 
 /** DAO 1 – todas as operações da tabela "receitas". */
 @Dao
@@ -14,13 +15,14 @@ interface ReceitaDao {
     @Insert
     suspend fun inserir(receita: Receita)
 
-    // R – Read: todas (as mais novas primeiro)
+    // R – Read: agora devolve um Flow (não é mais suspend).
+    // Sempre que a tabela muda, o Room manda a lista nova sozinho.
     @Query("SELECT * FROM receitas ORDER BY id DESC")
-    suspend fun buscarTodos(): List<Receita>
+    fun buscarTodos(): Flow<List<Receita>>
 
-    // R – Read filtrado: só a receita com esse id (usado na tela de detalhe)
+    // R – Read filtrado pelo id (também em Flow: o detalhe se atualiza sozinho)
     @Query("SELECT * FROM receitas WHERE id = :id")
-    suspend fun buscarPorId(id: Int): Receita?
+    fun buscarPorId(id: Int): Flow<Receita?>
 
     // U – Update
     @Update

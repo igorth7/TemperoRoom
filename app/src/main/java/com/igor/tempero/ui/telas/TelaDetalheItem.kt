@@ -1,6 +1,5 @@
 package com.igor.tempero.ui.telas
 
-import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,20 +31,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.igor.tempero.data.local.AppDatabase
-import com.igor.tempero.data.local.ItemCompra
-import com.igor.tempero.data.local.Receita
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.igor.tempero.ui.componentes.BarraTopo
 import com.igor.tempero.ui.componentes.EstadoVazio
 import com.igor.tempero.ui.componentes.ImagemCategoria
@@ -56,79 +49,24 @@ import com.igor.tempero.ui.theme.Laranja
 import com.igor.tempero.ui.theme.LaranjaClaro
 import com.igor.tempero.ui.theme.Marrom
 import com.igor.tempero.ui.theme.VermelhoErro
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.igor.tempero.viewmodel.ComprasViewModel
 
-private const val TAG = "TelaDetalheItem"
-
-/**
- * Tela 5 – Detalhe do item.
- * Recebe o id pela rota e busca o item no banco com buscarPorId(id).
- * Também busca a receita de origem (outra tabela) pelo receitaId.
- */
+/** Tela 5 – Detalhe do item: pede ao ViewModel o item do id da rota. */
 @Composable
 fun TelaDetalheItem(
     itemId: Int,
+    viewModel: ComprasViewModel,
     aoVoltar: () -> Unit,
     aoEditar: () -> Unit,
     aoAbrirReceita: (Int) -> Unit
 ) {
-    val context = LocalContext.current
-    val banco = remember { AppDatabase.getDatabase(context) }
-    val itemDao = banco.itemCompraDao()
-    val receitaDao = banco.receitaDao()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    var item by remember { mutableStateOf<ItemCompra?>(null) }
-    var receitaDeOrigem by remember { mutableStateOf<Receita?>(null) }
-    var carregou by remember { mutableStateOf(false) }
-
-    val recarregar: () -> Unit = {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val encontrado = itemDao.buscarPorId(itemId)
-                val origem = encontrado?.receitaId?.let { receitaDao.buscarPorId(it) }
-                withContext(Dispatchers.Main) {
-                    item = encontrado
-                    receitaDeOrigem = origem
-                    carregou = true
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao buscar o item $itemId", e)
-            }
-        }
+    LaunchedEffect(itemId) {
+        viewModel.selecionarItem(itemId)
     }
 
-    LaunchedEffect(Unit) {
-        recarregar()
-    }
-
-    // Grava a alteração no banco e busca de novo
-    val salvar: (ItemCompra) -> Unit = { alterado ->
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                itemDao.atualizar(alterado)   // UPDATE
-                recarregar()
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao atualizar item", e)
-            }
-        }
-    }
-
-    val remover: () -> Unit = {
-        val atual = item
-        if (atual != null) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    itemDao.deletar(atual)   // DELETE
-                    withContext(Dispatchers.Main) { aoVoltar() }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Erro ao remover item", e)
-                }
-            }
-        }
-    }
+    val item = uiState.itemSelecionado?.takeIf { it.id == itemId }
 
     Scaffold(
         topBar = {
@@ -147,9 +85,8 @@ fun TelaDetalheItem(
         containerColor = Creme,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        val atual = item
-        if (atual == null) {
-            if (carregou) {
+        if (item == null) {
+            if (uiState.selecionadoCarregou) {
                 Column(Modifier.padding(padding)) {
                     EstadoVazio("😕", "Item não encontrado", "Ele pode ter sido removido.")
                 }
@@ -170,13 +107,13 @@ fun TelaDetalheItem(
                         .background(LaranjaClaro),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(if (atual.comprado) "✅" else "🛒", fontSize = 56.sp)
+                    Text(if (item.comprado) "✅" else "🛒", fontSize = 56.sp)
                 }
 
-                Text(atual.nome, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Marrom)
+                Text(item.nome, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Marrom)
                 Text(
-                    if (atual.comprado) "Já comprado" else "Falta comprar",
-                    color = if (atual.comprado) Laranja else CinzaTexto,
+                    if (item.comprado) "Já comprado" else "Falta comprar",
+                    color = if (item.comprado) Laranja else CinzaTexto,
                     fontWeight = FontWeight.SemiBold
                 )
 
@@ -191,19 +128,15 @@ fun TelaDetalheItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Quantidade", fontSize = 16.sp, color = Marrom, modifier = Modifier.weight(1f))
-                        BotaoRedondo("−") {
-                            salvar(atual.copy(quantidade = (atual.quantidade - 1).coerceAtLeast(1)))
-                        }
+                        BotaoRedondo("−") { viewModel.mudarQuantidade(item, -1) }
                         Text(
-                            "${atual.quantidade}",
+                            "${item.quantidade}",
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
                             color = Marrom,
                             modifier = Modifier.padding(horizontal = 18.dp)
                         )
-                        BotaoRedondo("+") {
-                            salvar(atual.copy(quantidade = atual.quantidade + 1))
-                        }
+                        BotaoRedondo("+") { viewModel.mudarQuantidade(item, 1) }
                     }
                 }
 
@@ -218,8 +151,8 @@ fun TelaDetalheItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(
-                            checked = atual.comprado,
-                            onCheckedChange = { salvar(atual.copy(comprado = !atual.comprado)) },
+                            checked = item.comprado,
+                            onCheckedChange = { viewModel.alternarComprado(item) },
                             colors = CheckboxDefaults.colors(checkedColor = Laranja)
                         )
                         Text("Marcar como comprado", fontSize = 16.sp, color = Marrom)
@@ -228,7 +161,7 @@ fun TelaDetalheItem(
 
                 // Extra: de qual receita este item veio (dado da outra tabela)
                 TituloSecao("Origem")
-                val origem = receitaDeOrigem
+                val origem = uiState.receitaDe(item)
                 if (origem != null) {
                     Card(
                         modifier = Modifier.clickable { aoAbrirReceita(origem.id) },
@@ -249,14 +182,14 @@ fun TelaDetalheItem(
                             }
                         }
                     }
-                } else if (atual.receitaId != null) {
+                } else if (item.receitaId != null) {
                     Text("A receita de origem foi excluída.", color = CinzaTexto)
                 } else {
                     Text("Adicionado à mão na lista de compras.", color = CinzaTexto)
                 }
 
                 OutlinedButton(
-                    onClick = remover,
+                    onClick = { viewModel.remover(item, aoTerminar = aoVoltar) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = VermelhoErro)
                 ) {

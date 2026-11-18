@@ -1,6 +1,5 @@
 package com.igor.tempero.ui.telas
 
-import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,23 +27,16 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.igor.tempero.data.local.AppDatabase
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.igor.tempero.data.local.ItemCompra
-import com.igor.tempero.data.local.Receita
 import com.igor.tempero.ui.componentes.BarraTopo
 import com.igor.tempero.ui.componentes.EstadoVazio
 import com.igor.tempero.ui.theme.CinzaTexto
@@ -53,84 +45,18 @@ import com.igor.tempero.ui.theme.Laranja
 import com.igor.tempero.ui.theme.Linha
 import com.igor.tempero.ui.theme.Marrom
 import com.igor.tempero.ui.theme.VermelhoErro
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.igor.tempero.viewmodel.ComprasViewModel
 
-private const val TAG = "TelaCompras"
-
-/** Tela 4 – Lista de compras, lida do banco (Room). */
+/** Tela 4 – Lista de compras. Observa o uiState e chama o ComprasViewModel. */
 @Composable
 fun TelaCompras(
+    viewModel: ComprasViewModel,
     aoAbrirItem: (Int) -> Unit,
     aoNovoItem: () -> Unit
 ) {
-    val context = LocalContext.current
-    val banco = remember { AppDatabase.getDatabase(context) }
-    val itemDao = banco.itemCompraDao()
-    val receitaDao = banco.receitaDao()
-
-    val itens = remember { mutableStateListOf<ItemCompra>() }
-    val receitas = remember { mutableStateListOf<Receita>() }   // só para mostrar de qual receita veio
-    var carregou by remember { mutableStateOf(false) }
-
-    val recarregar: () -> Unit = {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val listaItens = itemDao.buscarTodos()
-                val listaReceitas = receitaDao.buscarTodos()
-                withContext(Dispatchers.Main) {
-                    itens.clear()
-                    itens.addAll(listaItens)
-                    receitas.clear()
-                    receitas.addAll(listaReceitas)
-                    carregou = true
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao buscar itens", e)
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        recarregar()
-    }
-
-    val alternarComprado: (ItemCompra) -> Unit = { item ->
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                itemDao.atualizar(item.copy(comprado = !item.comprado))   // UPDATE
-                recarregar()
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao marcar item", e)
-            }
-        }
-    }
-
-    val remover: (ItemCompra) -> Unit = { item ->
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                itemDao.deletar(item)   // DELETE
-                recarregar()
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao remover item", e)
-            }
-        }
-    }
-
-    val limparComprados: () -> Unit = {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                itemDao.limparComprados()
-                recarregar()
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao limpar comprados", e)
-            }
-        }
-    }
-
-    val comprados = itens.count { it.comprado }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val itens = uiState.itens
+    val comprados = uiState.comprados
 
     Scaffold(
         topBar = {
@@ -138,7 +64,7 @@ fun TelaCompras(
                 titulo = "Lista de compras",
                 acoes = {
                     if (comprados > 0) {
-                        TextButton(onClick = limparComprados) {
+                        TextButton(onClick = { viewModel.limparComprados() }) {
                             Text("Limpar comprados", color = Laranja)
                         }
                     }
@@ -176,20 +102,19 @@ fun TelaCompras(
                 }
             }
 
-            if (carregou && itens.isEmpty()) {
+            if (!uiState.carregando && itens.isEmpty()) {
                 item {
                     EstadoVazio("🛒", "Lista vazia", "Toque no + ou adicione os ingredientes de uma receita.")
                 }
             }
 
             items(itens, key = { it.id }) { item ->
-                val origem = receitas.find { it.id == item.receitaId }?.nome
                 CardItemCompra(
                     item = item,
-                    origem = origem,
+                    origem = uiState.receitaDe(item)?.nome,
                     aoClicar = { aoAbrirItem(item.id) },
-                    aoAlternarComprado = { alternarComprado(item) },
-                    aoRemover = { remover(item) }
+                    aoAlternarComprado = { viewModel.alternarComprado(item) },
+                    aoRemover = { viewModel.remover(item) }
                 )
             }
         }

@@ -63,6 +63,11 @@ dependencies {
     // ---------- Coroutines (CoroutineScope, Dispatchers.IO) ----------
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
+    // ---------- ViewModel + StateFlow no Compose (MVVM) ----------
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
+
     // ---------- Navigation Compose (NavHost, rotas, argumentos) ----------
     implementation("androidx.navigation:navigation-compose:2.9.0")
 

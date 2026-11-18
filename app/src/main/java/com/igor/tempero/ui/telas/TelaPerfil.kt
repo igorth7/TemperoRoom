@@ -1,6 +1,5 @@
 package com.igor.tempero.ui.telas
 
-import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,20 +21,15 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.igor.tempero.data.local.AppDatabase
-import com.igor.tempero.data.local.ItemCompra
-import com.igor.tempero.data.local.Receita
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.igor.tempero.ui.componentes.BarraTopo
 import com.igor.tempero.ui.componentes.CardNumero
 import com.igor.tempero.ui.componentes.TituloSecao
@@ -45,43 +39,23 @@ import com.igor.tempero.ui.theme.Creme
 import com.igor.tempero.ui.theme.Laranja
 import com.igor.tempero.ui.theme.Linha
 import com.igor.tempero.ui.theme.Marrom
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.igor.tempero.viewmodel.ComprasViewModel
+import com.igor.tempero.viewmodel.ReceitasViewModel
 
-private const val TAG = "TelaPerfil"
-
-/** Tela 7 – Perfil: resumo calculado com os dados das duas tabelas. */
+/** Tela 7 – Perfil: resumo calculado com o estado dos 2 ViewModels. */
 @Composable
 fun TelaPerfil(
+    receitasViewModel: ReceitasViewModel,
+    comprasViewModel: ComprasViewModel,
     aoAbrirReceita: (Int) -> Unit
 ) {
-    val context = LocalContext.current
-    val banco = remember { AppDatabase.getDatabase(context) }
+    val estadoReceitas by receitasViewModel.uiState.collectAsStateWithLifecycle()
+    val estadoCompras by comprasViewModel.uiState.collectAsStateWithLifecycle()
 
-    val receitas = remember { mutableStateListOf<Receita>() }
-    val itens = remember { mutableStateListOf<ItemCompra>() }
-
-    LaunchedEffect(Unit) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val listaReceitas = banco.receitaDao().buscarTodos()
-                val listaItens = banco.itemCompraDao().buscarTodos()
-                withContext(Dispatchers.Main) {
-                    receitas.clear()
-                    receitas.addAll(listaReceitas)
-                    itens.clear()
-                    itens.addAll(listaItens)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Erro ao carregar o perfil", e)
-            }
-        }
-    }
-
+    val receitas = estadoReceitas.receitas
+    val itens = estadoCompras.itens
     val favoritas = receitas.filter { it.favorita }
-    val comprados = itens.count { it.comprado }
+    val comprados = estadoCompras.comprados
     val categoriaPreferida = receitas.groupBy { it.categoria }.maxByOrNull { it.value.size }?.key ?: "-"
 
     Scaffold(
@@ -134,7 +108,7 @@ fun TelaPerfil(
                 }
             }
 
-            Text("💾 Tudo fica salvo no banco do celular (Room).", color = CinzaTexto, fontSize = 13.sp)
+            Text("💾 Tudo fica salvo no banco do celular (Room), organizado em MVVM.", color = CinzaTexto, fontSize = 13.sp)
 
             TituloSecao("Minhas favoritas")
             if (favoritas.isEmpty()) {

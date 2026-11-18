@@ -1,5 +1,6 @@
 package com.igor.tempero.ui.componentes
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,10 +27,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -202,4 +205,16 @@ fun TituloSecao(texto: String) {
         color = Marrom,
         modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
     )
+}
+
+/** Mostra um Toast quando chega uma mensagem no UiState e avisa o ViewModel que já mostrou. */
+@Composable
+fun ToastDeMensagem(mensagem: String?, aoExibir: () -> Unit) {
+    val context = LocalContext.current
+    LaunchedEffect(mensagem) {
+        if (mensagem != null) {
+            Toast.makeText(context, mensagem, Toast.LENGTH_SHORT).show()
+            aoExibir()
+        }
+    }
 }
